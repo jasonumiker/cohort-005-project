@@ -1,4 +1,4 @@
-import { Outlet } from "react-router";
+import { Outlet, useLocation, useSearchParams } from "react-router";
 import type { Route } from "./+types/layout.app";
 import { Sidebar } from "~/components/sidebar";
 import { DevUI } from "~/components/dev-ui";
@@ -217,6 +217,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function AppLayout({ loaderData }: Route.ComponentProps) {
+  const [params] = useSearchParams();
+  const location = useLocation();
+  const isPrototype =
+    import.meta.env.DEV &&
+    location.pathname === "/dashboard" &&
+    /^[ABC]$/.test(params.get("variant") ?? "");
   const {
     users,
     currentUser,
@@ -228,7 +234,9 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
   } = loaderData;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div
+      className={`flex h-screen overflow-hidden ${isPrototype ? "[&>aside]:hidden md:[&>aside]:flex" : ""}`}
+    >
       <Sidebar
         currentUser={currentUser}
         recentCourses={recentCourses}

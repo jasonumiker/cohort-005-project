@@ -1,4 +1,5 @@
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
+import { NotificationPrototype } from "~/components/notification-prototype";
 import type { Route } from "./+types/dashboard";
 import { db } from "~/db";
 import {
@@ -268,6 +269,20 @@ export function HydrateFallback() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
+  const [params] = useSearchParams();
+  if (import.meta.env.DEV && /^[ABC]$/.test(params.get("variant") ?? "")) {
+    return (
+      <NotificationPrototype>
+        <DashboardContent loaderData={loaderData} />
+      </NotificationPrototype>
+    );
+  }
+  return <DashboardContent loaderData={loaderData} />;
+}
+
+function DashboardContent({
+  loaderData,
+}: Pick<Route.ComponentProps, "loaderData">) {
   const { inProgressCourses, completedCourses } = loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
 
