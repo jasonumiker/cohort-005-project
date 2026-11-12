@@ -1,5 +1,5 @@
 // Throwaway: compare three inbox layouts on /dashboard?variant=A|B|C with synthetic state.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { Dialog, Popover } from "radix-ui";
 import {
@@ -20,7 +20,14 @@ import { cn } from "~/lib/utils";
 
 type Persona = "Student" | "Team Admin" | "Platform Admin";
 type Scenario =
-  "normal" | "loading" | "empty" | "error" | "offline" | "handled" | "denied";
+  | "normal"
+  | "loading"
+  | "empty"
+  | "error"
+  | "offline"
+  | "handled"
+  | "denied"
+  | "update-error";
 type Filter = "All" | "Unread" | "Archived";
 type Item = {
   id: string;
@@ -143,25 +150,55 @@ export function VariantA({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 639px)");
+    function update() {
+      setMobile(query.matches);
+    }
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
   return (
     <>
       <div className="flex items-center justify-between border-b px-6 py-3">
         <span className="text-sm font-medium">Cadence / Your workspace</span>
-        <Popover.Root open={open} onOpenChange={onOpenChange}>
-          <Popover.Trigger asChild>{trigger}</Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              aria-label="Notifications"
-              align="end"
-              sideOffset={10}
-              collisionPadding={12}
-              className="z-40 flex max-h-[var(--radix-popover-content-available-height)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border bg-popover shadow-2xl"
-            >
-              {panel}
-              <Popover.Arrow className="fill-popover" />
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+        {mobile ? (
+          <Dialog.Root open={open} onOpenChange={onOpenChange}>
+            <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
+              <Dialog.Content className="fixed inset-x-0 top-16 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl border bg-background pb-[env(safe-area-inset-bottom)] shadow-2xl">
+                <Dialog.Title asChild>
+                  <span className="sr-only">Notifications</span>
+                </Dialog.Title>
+                <Dialog.Description className="sr-only">
+                  Updates about Purchases, Team Licences, and work needing your
+                  attention.
+                </Dialog.Description>
+                {panel}
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+        ) : (
+          <Popover.Root open={open} onOpenChange={onOpenChange}>
+            <Popover.Trigger asChild>{trigger}</Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                aria-label="Notifications"
+                align="end"
+                sideOffset={10}
+                collisionPadding={12}
+                className="z-40 flex max-h-[var(--radix-popover-content-available-height)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border bg-popover shadow-2xl"
+              >
+                {panel}
+                <Popover.Arrow className="fill-popover" />
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
       </div>
       {children}
     </>
@@ -272,7 +309,9 @@ function PrototypeSession({
   const [archived, setArchived] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [destination, setDestination] = useState<Item | null>(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(variant === "B");
+  const [mutationError, setMutationError] = useState(false);
+  const readOnly = scenario === "offline";
   const unavailable = scenario === "loading" || scenario === "error";
   const activeItems =
     scenario === "empty"
@@ -287,12 +326,24 @@ function PrototypeSession({
   );
   const selectedItem = visible.find((item) => item.id === selected);
 
+  function canUpdate() {
+    if (readOnly) return false;
+    if (scenario === "update-error") {
+      setMutationError(true);
+      return false;
+    }
+    setMutationError(false);
+    return true;
+  }
+
   function markRead(id: string) {
+    if (!canUpdate()) return;
     setRead((current) => (current.includes(id) ? current : [...current, id]));
   }
 
   function visit(item: Item) {
-    if (scenario !== "denied") markRead(item.id);
+    markRead(item.id);
+    if (variant === "A") setOpen(false);
     setDestination(item);
   }
 
@@ -303,7 +354,8 @@ function PrototypeSession({
     setDestination(null);
     setScenario("normal");
     setFilter("All");
-    setOpen(true);
+    setMutationError(false);
+    setOpen(variant === "B");
   }
 
   const bell = (
@@ -321,7 +373,7 @@ function PrototypeSession({
       <span className="hidden sm:inline">Notifications</span>
       {!unavailable && unread > 0 && (
         <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
-          {unread}
+          {unread > 99 ? "99+" : unread}
         </span>
       )}
     </Button>
@@ -334,13 +386,15 @@ function PrototypeSession({
           size="icon-sm"
           variant="ghost"
           aria-label={`${read.includes(item.id) ? "Mark unread" : "Mark read"}: ${item.title}`}
-          onClick={() =>
+          disabled={readOnly}
+          onClick={() => {
+            if (!canUpdate()) return;
             setRead((current) =>
               current.includes(item.id)
                 ? current.filter((id) => id !== item.id)
                 : [...current, item.id]
-            )
-          }
+            );
+          }}
         >
           {read.includes(item.id) ? <Circle /> : <CheckCheck />}
         </Button>
@@ -348,7 +402,9 @@ function PrototypeSession({
           size="icon-sm"
           variant="ghost"
           aria-label={`${archived.includes(item.id) ? "Restore" : "Archive"}: ${item.title}`}
+          disabled={readOnly}
           onClick={() => {
+            if (!canUpdate()) return;
             setArchived((current) =>
               current.includes(item.id)
                 ? current.filter((id) => id !== item.id)
@@ -386,7 +442,7 @@ function PrototypeSession({
           </p>
         ) : (
           <Button onClick={() => visit(item)}>
-            {scenario === "handled" ? "View current status" : item.action}
+            {item.action}
             <ArrowUpRight />
           </Button>
         )}
@@ -408,11 +464,26 @@ function PrototypeSession({
         <Button
           size="sm"
           variant="ghost"
-          disabled={unavailable || unread === 0}
-          onClick={() => setRead(items.map((item) => item.id))}
+          disabled={unavailable || readOnly || unread === 0}
+          onClick={() => {
+            if (!canUpdate()) return;
+            setRead((current) => [
+              ...new Set([...current, ...activeItems.map((item) => item.id)]),
+            ]);
+          }}
         >
           Mark all read
         </Button>
+        {variant === "A" && (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Close notifications"
+            onClick={() => setOpen(false)}
+          >
+            <X />
+          </Button>
+        )}
       </div>
       <div
         className="flex shrink-0 gap-1 border-b p-2"
@@ -435,8 +506,37 @@ function PrototypeSession({
           role="status"
           className="border-b bg-amber-50 p-3 text-xs text-amber-950"
         >
-          Offline: showing cached demo items. New updates and sync are paused.
+          Offline: showing cached demo items. Read and archive changes are
+          paused; destination navigation may still be attempted.
+          <Button
+            size="sm"
+            variant="link"
+            onClick={() => {
+              setScenario("normal");
+              setMutationError(false);
+            }}
+          >
+            Reconnect (mock)
+          </Button>
         </p>
+      )}
+      {mutationError && (
+        <div
+          role="alert"
+          className="border-b bg-red-50 p-3 text-xs text-red-950"
+        >
+          Could not save your notification change. Nothing changed.
+          <Button
+            size="sm"
+            variant="link"
+            onClick={() => {
+              setScenario("normal");
+              setMutationError(false);
+            }}
+          >
+            Retry connection (mock)
+          </Button>
+        </div>
       )}
       <div
         className={cn(
@@ -547,9 +647,7 @@ function PrototypeSession({
                       className="h-auto p-0"
                       onClick={() => visit(item)}
                     >
-                      {scenario === "handled"
-                        ? "View current status"
-                        : item.action}
+                      {item.action}
                       <ArrowUpRight />
                     </Button>
                     {itemActions(item)}
@@ -604,6 +702,7 @@ function PrototypeSession({
               <option value="offline">Offline / cached</option>
               <option value="handled">Already handled</option>
               <option value="denied">Access removed</option>
+              <option value="update-error">State update rejected</option>
             </select>
           </label>
           <Button size="sm" variant="outline" onClick={reset}>
@@ -611,9 +710,10 @@ function PrototypeSession({
           </Button>
         </div>
         <p className="text-xs">
-          Layout: {variant}. Opening the inbox does not mark items read. Opening
-          an item does. Archive hides; restore brings it back. Reload resets
-          everything. These are proposals, not approved behavior.
+          Layout: {variant}. Opening the inbox does not mark items read.
+          Intentional item opening marks read when connected, even if its
+          destination denies access. Archive preserves read state. Offline
+          changes are disabled. Reload resets everything.
         </p>
         <details className="text-xs">
           <summary className="cursor-pointer">
@@ -630,6 +730,7 @@ function PrototypeSession({
                 unread,
                 read,
                 archived,
+                mutationError,
                 selected,
                 simulatedDestination: destination?.destination ?? null,
               },
